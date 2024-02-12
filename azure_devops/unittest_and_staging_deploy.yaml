@@ -1,0 +1,83 @@
+trigger: none
+
+# Grab variables from the specific variable group and
+# determine branchName
+variables:
+  - group: 'Bundle Deployment Variables'
+  - name: 'branchName'
+    ${{ if startsWith(variables['Build.SourceBranch'], 'refs/heads/') }}:
+      value: $[ replace(variables['Build.SourceBranch'], 'refs/heads/', '') ]
+    ${{ if startsWith(variables['Build.SourceBranch'], 'refs/pull/') }}:
+      value: $[ replace(variables['System.PullRequest.SourceBranch'], 'refs/heads/', '') ]
+
+pool:
+  vmImage: ubuntu-20.04
+
+# Install Python. The version of Python must match the version on the
+# Azure Databricks cluster. This pipeline assumes that you are using
+# Databricks Runtime 10.4 LTS on the cluster.
+steps:
+- task: UsePythonVersion@0
+  displayName: 'Use Python 3.8'
+  inputs:
+    versionSpec: 3.8
+
+# Download the files from the designated branch in the Git remote repository
+# onto the build agent.
+- checkout: self
+  persistCredentials: true
+  clean: true
+
+# Install poetry for running unit tests
+- script: |
+    curl -sSL https://install.python-poetry.org | python -
+    export PATH=$PATH:$HOME/.poetry/bin
+    poetry install --no-root
+  displayName: 'Install dependencies'
+
+- script: echo "##vso[task.prependpath]$HOME/.poetry/bin"
+  displayName: Add poetry to PATH
+
+#Checkout branch on directory on which unit tests will be run
+- script: |
+    echo "Checking out the $(branchName) branch"
+    poetry run databricks repos update --path $(repo-directory) --branch "$(branchName)"
+  env:
+    DATABRICKS_HOST: $(host-dev)
+    DATABRICKS_TOKEN: $(token-dev)
+  displayName: 'Update Dev Repo'
+
+#Run and publish the unit test notebooks
+- script: |
+    poetry run nutter run "$(repo-directory)/50_tests/20_unit-notebooks/" --cluster_id $(cluster-id-dev) --recursive --junit_report --timeout 500
+  env:
+    DATABRICKS_HOST: $(host-dev)
+    DATABRICKS_TOKEN: $(token-dev)
+  displayName: 'Execute Nutter tests'
+
+- task: PublishTestResults@2
+  condition: succeededOrFailed()
+  inputs:
+    testResultsFormat: 'JUnit'
+    testResultsFiles: '**/test-*.xml' 
+    failTaskOnFailedTests: true
+
+# Clean up unwanted files beginning with "test-nutter-result"
+- script: |
+    find "$(Build.SourcesDirectory)" -type f -name 'test-nutter-result*' -exec rm -f {} \;
+  displayName: 'Remove Unwanted Test Result Files'
+
+#Deploy bundle to staging environment (and run workflow)
+- script: |
+    echo "Installing latest version Databricks CLI..."
+    /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+    (echo; echo 'eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"') >> /home/vsts/.bash_profile
+    eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
+    brew tap databricks/tap
+    brew install databricks
+    databricks bundle deploy
+    databricks bundle run sales_job --refresh-all 2>&1 | tee output.log
+  displayName: 'Deploy to Staging and run pipeline update'
+  env:
+    DATABRICKS_TOKEN: $(token-stg) #Replace with a PAT token for your stg environment
+    DATABRICKS_BUNDLE_ENV: 'stg'
