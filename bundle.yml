@@ -1,0 +1,74 @@
+# yaml-language-server: $schema=bundle_config_schema.json
+bundle:
+  name: DatabricksDreamTeamBundle
+
+workspace:
+  host: https://adb-3130183009823587.7.azuredatabricks.net/ #Update to your Dev Workspace host address
+  root_path: /Shared/.bundle/${bundle.environment}/${bundle.name}
+
+resources:
+
+  pipelines:
+    # A DLT pipeline processed the data from bronze to gold
+    sales_pipeline:
+      name: "[${bundle.environment}] DLT Sales"
+      target: "sales_${bundle.environment}"
+      libraries:
+        - notebook:
+            path: "./20_bronze/sales_bronze.py"
+        - notebook:
+            path: "./30_silver/sales_silver.py"
+        - notebook:
+            path: "./40_gold/sales_gold.py"
+      channel: preview
+
+  jobs:
+    # A two-task Databricks Workflow - Ingestion + DLT pipeline
+    sales_job:
+      name: "[${bundle.environment}] Job Sales"
+      tasks:
+        - task_key: "${bundle.environment}_sales_ingestion_notebook"
+          notebook_task: 
+            notebook_path: "./10_ingestion/sales_ingestion_${bundle.environment}.py"
+          new_cluster:
+            spark_version: 13.1.x-scala2.12
+            num_workers: 1
+            node_type_id: Standard_DS3_v2   
+        - task_key: dlt_sales_pipeline
+          pipeline_task:
+            pipeline_id: ${resources.pipelines.sales_pipeline.id}
+          depends_on:
+            - task_key: "${bundle.environment}_sales_ingestion_notebook"
+                 
+targets:
+  dev:
+    default: true
+    resources:
+      pipelines:
+        sales_pipeline:
+          development: true
+
+  stg:
+    workspace:
+      host: https://adb-3130183009823587.7.azuredatabricks.net/ #Replace with the host address of your stg environment
+    resources:
+      pipelines:
+        sales_pipeline:
+          libraries:
+          #Adding a Notebook to the DLT pipeline that tests the data
+          - notebook:
+              path: "./50_tests/10_integration/DLT-Pipeline-Test.py"
+          development: true
+
+  prod:
+    workspace:
+      host: https://adb-3130183009823587.7.azuredatabricks.net/ #Replace with the host address of your prod environment
+    resources:
+      pipelines:
+        sales_pipeline:
+          development: false
+          #Update the cluster settings of the DLT pipeline
+          clusters:
+            - autoscale:
+                min_workers: 1
+                max_workers: 2

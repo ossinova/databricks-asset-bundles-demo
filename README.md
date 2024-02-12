@@ -11,7 +11,7 @@ This Repo contains an example of a Databricks Asset Bundle and Azure DevOps pipe
 # Getting Started
 To deploy this bundle into a dev environment, you need to have Visual Studio installed. After updating the Workspace host addresses in the bundle.yml file to your Databricks Workspaces you can deploy using the 'databricks bundle deploy' command in a Bash terminal (requires latest version of Databricks CLI to be installed + authentication using 'databricks configure' or a Databricks configuration profile, see: https://docs.databricks.com/en/dev-tools/cli/authentication.html#basic-authentication). 
 
-The ado folder also contains 2 Azure DevOps Pipeline configurations in .yaml format for deployment to staging/production environments, you can use these to create the Azure Pipelines in Azure DevOps. 
+The azure_devops folder also contains 2 Azure DevOps Pipeline configurations in .yaml format for deployment to staging/production environments, you can use these to create the Azure Pipelines in Azure DevOps. 
 
 To run the Build Pipelines in Azure DevOps, following requirements are necessary:
 
